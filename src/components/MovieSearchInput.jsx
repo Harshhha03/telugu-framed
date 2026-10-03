@@ -43,6 +43,7 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
+  const [selected, setSelected] = useState(null)
   const [searchError, setSearchError] = useState(null)
   const boxRef = useRef(null)
 
@@ -79,14 +80,22 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
   const guessedKeys = new Set(guessedMovies.map((g) => (TMDB_KEY ? g.tmdbId : g.id)))
   const visibleResults = results.filter((r) => !guessedKeys.has(TMDB_KEY ? r.tmdbId : r.id))
 
-  function pick(result) {
+  function selectResult(result) {
+    setSelected(result)
+    setQuery(result.title)
     setOpen(false)
-    setQuery('')
     setResults([])
+  }
+
+  function handleSubmit() {
+    if (!selected || disabled) return
     // No resolve step here anymore — the hook submits this straight to the
     // server (which resolves-or-creates the local row AND records the guess
     // in one call) rather than us doing a separate round trip first.
-    onGuess(result)
+    onGuess(selected)
+    setSelected(null)
+    setQuery('')
+    setResults([])
   }
 
   return (
@@ -98,16 +107,20 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
         placeholder="Type a Telugu movie title&hellip;"
         onChange={(e) => {
           setQuery(e.target.value)
+          setSelected(null) // typing again invalidates whatever was picked before
           setOpen(true)
         }}
         onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && selected) handleSubmit()
+        }}
         aria-label="Search for a movie to guess"
       />
       {open && visibleResults.length > 0 && (
         <ul className="search__results">
           {visibleResults.map((r) => (
             <li key={r.tmdbId ?? r.id}>
-              <button type="button" onClick={() => pick(r)} disabled={disabled}>
+              <button type="button" onClick={() => selectResult(r)} disabled={disabled}>
                 <span className="search__title">{r.title}</span>
                 {r.releaseYear && <span className="search__year">{r.releaseYear}</span>}
               </button>
@@ -115,6 +128,9 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
           ))}
         </ul>
       )}
+      <button type="button" className="search__submit" onClick={handleSubmit} disabled={!selected || disabled}>
+        Submit Guess
+      </button>
       {searchError && <p className="status-line status-line--error search__hint">{searchError}</p>}
       {!TMDB_KEY && (
         <p className="hint search__hint">
@@ -126,6 +142,7 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
         <ul className="search__history">
           {guessedMovies.map((g, i) => (
             <li key={g.tmdbId ?? g.id} className="guess-tile">
+              <span className="guess-tile__icon" aria-hidden="true">✗</span>
               <span className="guess-tile__frame">Frame {i + 1}</span>
               <span className="guess-tile__title">{g.title}</span>
             </li>

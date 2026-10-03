@@ -204,6 +204,11 @@ body {
 
 .search__year { color: var(--muted); font-size: 0.85rem; }
 
+.search__submit {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .search__hint {
   margin-top: 8px;
 }
@@ -225,6 +230,20 @@ body {
   border-radius: 6px;
   background: rgba(194, 66, 125, 0.14);
   border: 1px solid rgba(194, 66, 125, 0.4);
+}
+
+.guess-tile__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--rose);
+  color: #2c1420;
+  font-weight: 700;
+  font-size: 0.8rem;
 }
 
 .guess-tile__frame {
