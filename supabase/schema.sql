@@ -240,6 +240,7 @@ declare
   v_solved boolean;
   v_is_correct boolean;
   v_movie json;
+  v_next_frame_url text;
 begin
   select id, movie_id into v_game_day_id, v_answer_id
   from game_days where play_date = current_date;
@@ -269,10 +270,16 @@ begin
       'title', title, 'telugu_title', telugu_title,
       'release_year', release_year, 'poster_url', poster_url
     ) into v_movie from movies where id = v_answer_id;
+  else
+    -- Hand back the next frame in the same round trip, instead of making
+    -- the client fetch it with a second call right after this one.
+    select image_url into v_next_frame_url from frames
+    where movie_id = v_answer_id and frame_number = (v_count + 2);
   end if;
 
   return json_build_object(
     'attempt_number', v_count + 1,
+    'next_frame_url', v_next_frame_url,
     'is_correct', v_is_correct,
     'total_frames', v_total,
     'game_over', (not v_is_correct and (v_count + 1) >= v_total),
@@ -313,6 +320,35 @@ begin
 end;
 $$;
 
+-- Combines resolve_tmdb_movie + submit_guess into one round trip, since
+-- doing them as two separate client calls was adding a full extra
+-- network hop to every single guess.
+create or replace function public.submit_tmdb_guess(
+  p_session_id text,
+  p_tmdb_id int,
+  p_title text,
+  p_release_year int default null,
+  p_poster_url text default null
+)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_movie_id uuid;
+begin
+  select id into v_movie_id from movies where tmdb_id = p_tmdb_id;
+  if v_movie_id is null then
+    insert into movies (title, release_year, poster_url, tmdb_id)
+    values (p_title, p_release_year, p_poster_url, p_tmdb_id)
+    returning id into v_movie_id;
+  end if;
+
+  return submit_guess(p_session_id, v_movie_id);
+end;
+$$;
+
 -- Let any client call these RPCs (RLS on the underlying tables still applies
 -- to everything that ISN'T going through a SECURITY DEFINER function).
 grant execute on function public.get_today_meta() to anon, authenticated;
@@ -320,6 +356,7 @@ grant execute on function public.get_frame(int) to anon, authenticated;
 grant execute on function public.get_session_progress(text) to anon, authenticated;
 grant execute on function public.submit_guess(text, uuid) to anon, authenticated;
 grant execute on function public.resolve_tmdb_movie(int, text, int, text) to anon, authenticated;
+grant execute on function public.submit_tmdb_guess(text, int, text, int, text) to anon, authenticated;
 
 -- ------------------------------------------------------------
 -- Storage bucket for frame images

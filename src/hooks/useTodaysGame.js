@@ -83,15 +83,31 @@ export function useTodaysGame() {
     async (guessedMovie) => {
       if (submitting) return
       // Defense in depth: MovieSearchInput already filters these out of its
-      // suggestions, but guard here too in case of a stale list.
-      if (guessedMovies.some((g) => g.id === guessedMovie.id)) return
+      // suggestions, but guard here too in case of a stale list. TMDB-sourced
+      // guesses are deduped by tmdbId (no local id exists yet at this point);
+      // local-search guesses are deduped by their real id.
+      const alreadyGuessed = guessedMovie.tmdbId
+        ? guessedMovies.some((g) => g.tmdbId === guessedMovie.tmdbId)
+        : guessedMovies.some((g) => g.id === guessedMovie.id)
+      if (alreadyGuessed) return
 
       setSubmitting(true)
       try {
-        const { data, error: err } = await supabase.rpc('submit_guess', {
-          p_session_id: sessionId,
-          p_movie_id: guessedMovie.id,
-        })
+        // One round trip either way: submit_tmdb_guess resolves-or-creates
+        // the local row AND records the guess server-side in a single call,
+        // instead of the client making two separate requests for that.
+        const { data, error: err } = guessedMovie.tmdbId
+          ? await supabase.rpc('submit_tmdb_guess', {
+              p_session_id: sessionId,
+              p_tmdb_id: guessedMovie.tmdbId,
+              p_title: guessedMovie.title,
+              p_release_year: guessedMovie.releaseYear ?? null,
+              p_poster_url: guessedMovie.posterUrl ?? null,
+            })
+          : await supabase.rpc('submit_guess', {
+              p_session_id: sessionId,
+              p_movie_id: guessedMovie.id,
+            })
         if (err) throw err
         if (data?.error) throw new Error(data.error)
 
@@ -102,8 +118,9 @@ export function useTodaysGame() {
         ])
 
         if (!data.is_correct && !data.game_over) {
-          const nextFrame = await loadFrame(data.attempt_number + 1)
-          setFrameUrls((prev) => [...prev, nextFrame])
+          // The next frame now comes back embedded in this same response —
+          // no second request needed.
+          setFrameUrls((prev) => [...prev, data.next_frame_url])
         }
 
         if (data.is_correct) {

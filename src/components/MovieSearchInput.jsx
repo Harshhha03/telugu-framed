@@ -30,7 +30,7 @@ async function searchLocal(query) {
     .limit(8)
   if (error) throw error
   return (data ?? []).map((m) => ({
-    id: m.id, // already a local row — no resolve step needed
+    id: m.id, // already a local row — resolved as-is, no tmdbId round trip needed
     title: m.title,
     releaseYear: m.release_year,
   }))
@@ -40,8 +40,6 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
-  const [resolving, setResolving] = useState(false)
-  const [error, setError] = useState(null)
   const boxRef = useRef(null)
 
   useEffect(() => {
@@ -74,36 +72,14 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
   const guessedKeys = new Set(guessedMovies.map((g) => (TMDB_KEY ? g.tmdbId : g.id)))
   const visibleResults = results.filter((r) => !guessedKeys.has(TMDB_KEY ? r.tmdbId : r.id))
 
-  async function pick(result) {
+  function pick(result) {
     setOpen(false)
     setQuery('')
     setResults([])
-
-    if (result.id) {
-      // Local-search path: already a real row, nothing to resolve.
-      onGuess({ id: result.id, title: result.title })
-      return
-    }
-
-    // TMDB path: find-or-create the local row this title maps to, so the
-    // guess can actually be compared against today's answer.
-    setResolving(true)
-    setError(null)
-    try {
-      const { data: localId, error: err } = await supabase.rpc('resolve_tmdb_movie', {
-        p_tmdb_id: result.tmdbId,
-        p_title: result.title,
-        p_release_year: result.releaseYear,
-        p_poster_url: result.posterUrl,
-      })
-      if (err) throw err
-      onGuess({ id: localId, title: result.title, tmdbId: result.tmdbId })
-    } catch (e) {
-      console.error(e)
-      setError('Could not submit that guess — try again.')
-    } finally {
-      setResolving(false)
-    }
+    // No resolve step here anymore — the hook submits this straight to the
+    // server (which resolves-or-creates the local row AND records the guess
+    // in one call) rather than us doing a separate round trip first.
+    onGuess(result)
   }
 
   return (
@@ -111,7 +87,7 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
       <input
         type="text"
         value={query}
-        disabled={disabled || resolving}
+        disabled={disabled}
         placeholder="Type a Telugu movie title&hellip;"
         onChange={(e) => {
           setQuery(e.target.value)
@@ -124,7 +100,7 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
         <ul className="search__results">
           {visibleResults.map((r) => (
             <li key={r.tmdbId ?? r.id}>
-              <button type="button" onClick={() => pick(r)} disabled={resolving}>
+              <button type="button" onClick={() => pick(r)} disabled={disabled}>
                 <span className="search__title">{r.title}</span>
                 {r.releaseYear && <span className="search__year">{r.releaseYear}</span>}
               </button>
@@ -138,11 +114,10 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
           movies you've added manually in Admin.
         </p>
       )}
-      {error && <p className="status-line status-line--error">{error}</p>}
       {guessedMovies.length > 0 && (
         <ul className="search__history">
           {guessedMovies.map((g, i) => (
-            <li key={g.id} className="guess-tile">
+            <li key={g.tmdbId ?? g.id} className="guess-tile">
               <span className="guess-tile__frame">Frame {i + 1}</span>
               <span className="guess-tile__title">{g.title}</span>
             </li>

@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchTmdbBackdrops } from '../lib/tmdbFrames'
 
 export default function FrameManager({ movies }) {
   const [movieId, setMovieId] = useState('')
   const [frames, setFrames] = useState([])
   const [uploading, setUploading] = useState(false)
+  const [autoFilling, setAutoFilling] = useState(false)
   const [error, setError] = useState(null)
+
+  const selectedMovie = movies.find((m) => m.id === movieId)
 
   useEffect(() => {
     if (!movieId) {
@@ -60,6 +64,40 @@ export default function FrameManager({ movies }) {
     await loadFrames(movieId)
   }
 
+  async function handleAutoFill(replace) {
+    if (!selectedMovie) return
+    setError(null)
+
+    if (!selectedMovie.tmdb_id) {
+      setError(`"${selectedMovie.title}" has no TMDB link — re-add it via "Look up on TMDB" to use auto-fill.`)
+      return
+    }
+    if (replace && !window.confirm(`Delete all ${frames.length} existing frames and replace with new ones from TMDB?`)) {
+      return
+    }
+
+    setAutoFilling(true)
+    try {
+      const urls = await fetchTmdbBackdrops(selectedMovie.tmdb_id)
+      if (urls.length === 0) throw new Error('TMDB has no usable images for this movie.')
+
+      if (replace) {
+        const { error: delErr } = await supabase.from('frames').delete().eq('movie_id', movieId)
+        if (delErr) throw delErr
+      }
+
+      const rows = urls.map((image_url, i) => ({ movie_id: movieId, frame_number: i + 1, image_url }))
+      const { error: insertErr } = await supabase.from('frames').insert(rows)
+      if (insertErr) throw insertErr
+
+      await loadFrames(movieId)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setAutoFilling(false)
+    }
+  }
+
   return (
     <div className="admin-card">
       <h3>Frames</h3>
@@ -88,6 +126,14 @@ export default function FrameManager({ movies }) {
               </li>
             ))}
           </ol>
+
+          <button type="button" className="secondary" onClick={() => handleAutoFill(frames.length > 0)} disabled={autoFilling}>
+            {autoFilling
+              ? 'Fetching from TMDB…'
+              : frames.length > 0
+                ? 'Replace all frames from TMDB'
+                : 'Auto-fill frames from TMDB'}
+          </button>
 
           <label className="upload-btn">
             {uploading ? 'Uploading…' : `Upload frame ${frames.length + 1}`}
