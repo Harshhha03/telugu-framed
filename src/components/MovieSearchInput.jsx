@@ -7,7 +7,10 @@ async function searchTmdb(query) {
   const res = await fetch(
     `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(query)}&api_key=${TMDB_KEY}&include_adult=false`
   )
-  if (!res.ok) throw new Error('TMDB search failed')
+  if (!res.ok) {
+    if (res.status === 429) throw new Error('TMDB rate limit hit — wait a few seconds and try again.')
+    throw new Error(`TMDB search failed (HTTP ${res.status})`)
+  }
   const data = await res.json()
   // Keep this to actual Telugu-language productions, since that's the point
   // of the game — otherwise every search floods with unrelated results.
@@ -40,6 +43,7 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
+  const [searchError, setSearchError] = useState(null)
   const boxRef = useRef(null)
 
   useEffect(() => {
@@ -53,15 +57,18 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
   useEffect(() => {
     if (query.trim().length < 2) {
       setResults([])
+      setSearchError(null)
       return
     }
     const t = setTimeout(async () => {
       try {
         const data = TMDB_KEY ? await searchTmdb(query.trim()) : await searchLocal(query.trim())
         setResults(data)
+        setSearchError(null)
       } catch (e) {
         console.error(e)
         setResults([])
+        setSearchError(e.message ?? 'Could not load suggestions.')
       }
     }, 250)
     return () => clearTimeout(t)
@@ -108,6 +115,7 @@ export default function MovieSearchInput({ onGuess, disabled, guessedMovies }) {
           ))}
         </ul>
       )}
+      {searchError && <p className="status-line status-line--error search__hint">{searchError}</p>}
       {!TMDB_KEY && (
         <p className="hint search__hint">
           Add VITE_TMDB_API_KEY to .env for full-catalog search — right now this only searches
